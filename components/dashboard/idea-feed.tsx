@@ -1,78 +1,65 @@
 "use client"
 
-import { useState } from "react"
-import { ThumbsUp, ThumbsDown, MessageSquare, Share2, Bookmark, TrendingUp } from "lucide-react"
+import { useState, useEffect } from "react"
+import { ThumbsUp, ThumbsDown, MessageSquare, Share2, Bookmark, TrendingUp, Loader2 } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { apiClient } from "@/lib/api-client"
+import { useAuth } from "@/context/auth-context"
+import { toast } from "sonner"
 
-const ideas = [
-  {
-    id: 1,
-    title: "AI-Powered Code Review Platform",
-    description: "An intelligent system that reviews pull requests using machine learning to catch bugs, suggest improvements, and ensure code quality standards.",
-    author: {
-      name: "Alex Chen",
-      avatar: "https://i.pravatar.cc/150?img=11",
-      role: "Software Engineer",
-    },
-    votes: 342,
-    comments: 28,
-    tags: ["AI/ML", "Developer Tools", "SaaS"],
-    trending: true,
-    createdAt: "2h ago",
-  },
-  {
-    id: 2,
-    title: "Sustainable Packaging Marketplace",
-    description: "Connect businesses with eco-friendly packaging suppliers. Features carbon footprint tracking and sustainability certifications.",
-    author: {
-      name: "Maya Patel",
-      avatar: "https://i.pravatar.cc/150?img=23",
-      role: "Product Manager",
-    },
-    votes: 256,
-    comments: 15,
-    tags: ["Sustainability", "B2B", "Marketplace"],
-    trending: false,
-    createdAt: "5h ago",
-  },
-  {
-    id: 3,
-    title: "Mental Health Check-in App for Teams",
-    description: "Anonymous wellness tracking for remote teams with AI insights for managers to improve team well-being.",
-    author: {
-      name: "Jordan Kim",
-      avatar: "https://i.pravatar.cc/150?img=33",
-      role: "UX Designer",
-    },
-    votes: 189,
-    comments: 42,
-    tags: ["Health", "HR Tech", "Remote Work"],
-    trending: true,
-    createdAt: "1d ago",
-  },
-]
-
-interface IdeaCardProps {
-  idea: (typeof ideas)[0]
-  index: number
+interface Idea {
+  id: number
+  title: string
+  description: string
+  author: {
+    username: string
+    avatar?: string
+  }
+  created_at: string
+  vote_count: number
+  user_vote: "up" | "down" | null
+  comments_count: number
+  tags: { name: string }[]
 }
 
-function IdeaCard({ idea, index }: IdeaCardProps) {
-  const [votes, setVotes] = useState(idea.votes)
-  const [userVote, setUserVote] = useState<"up" | "down" | null>(null)
-  const [isBookmarked, setIsBookmarked] = useState(false)
+function IdeaCard({ idea: initialIdea, index }: { idea: Idea; index: number }) {
+  const [idea, setIdea] = useState(initialIdea)
+  const [isVoting, setIsVoting] = useState(false)
+  const { user } = useAuth()
 
-  const handleVote = (type: "up" | "down") => {
-    if (userVote === type) {
-      setUserVote(null)
-      setVotes(idea.votes)
-    } else {
-      setUserVote(type)
-      setVotes(idea.votes + (type === "up" ? 1 : -1))
+  const handleVote = async (type: "up" | "down") => {
+    if (!user) {
+      toast.error("Please login to vote")
+      return
+    }
+
+    setIsVoting(true)
+    try {
+      const isRemoving = idea.user_vote === type
+      if (isRemoving) {
+        await apiClient.post(`ideas/${idea.id}/unvote/`)
+        setIdea({
+          ...idea,
+          user_vote: null,
+          vote_count: idea.vote_count + (type === "up" ? -1 : 1),
+        })
+      } else {
+        await apiClient.post(`ideas/${idea.id}/vote/`, { vote_type: type })
+        const voteDiff = idea.user_vote === null ? (type === "up" ? 1 : -1) : (type === "up" ? 2 : -2)
+        setIdea({
+          ...idea,
+          user_vote: type,
+          vote_count: idea.vote_count + voteDiff,
+        })
+      }
+    } catch (error) {
+      toast.error("Failed to vote")
+    } finally {
+      setIsVoting(false)
     }
   }
 
@@ -87,20 +74,14 @@ function IdeaCard({ idea, index }: IdeaCardProps) {
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             <Avatar className="size-10 ring-2 ring-border">
-              <AvatarImage src={idea.author.avatar} alt={idea.author.name} />
-              <AvatarFallback>{idea.author.name.charAt(0)}</AvatarFallback>
+              <AvatarImage src={`https://avatar.iran.liara.run/username?username=${idea.author.username}`} alt={idea.author.username} />
+              <AvatarFallback>{idea.author.username.charAt(0)}</AvatarFallback>
             </Avatar>
             <div>
-              <p className="text-sm font-medium text-foreground">{idea.author.name}</p>
-              <p className="text-xs text-muted-foreground">{idea.author.role} · {idea.createdAt}</p>
+              <p className="text-sm font-medium text-foreground">{idea.author.username}</p>
+              <p className="text-xs text-muted-foreground">{new Date(idea.created_at).toLocaleDateString()} · {new Date(idea.created_at).toLocaleTimeString()}</p>
             </div>
           </div>
-          {idea.trending && (
-            <Badge variant="secondary" className="bg-chart-1/20 text-chart-1 border-0 gap-1">
-              <TrendingUp className="size-3" />
-              Trending
-            </Badge>
-          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -111,8 +92,8 @@ function IdeaCard({ idea, index }: IdeaCardProps) {
 
         <div className="flex flex-wrap gap-2">
           {idea.tags.map((tag) => (
-            <Badge key={tag} variant="outline" className="text-xs bg-secondary/50">
-              {tag}
+            <Badge key={tag.name} variant="outline" className="text-xs bg-secondary/50">
+              {tag.name}
             </Badge>
           ))}
         </div>
@@ -123,30 +104,32 @@ function IdeaCard({ idea, index }: IdeaCardProps) {
               variant="ghost"
               size="sm"
               onClick={() => handleVote("up")}
+              disabled={isVoting}
               className={cn(
                 "gap-1.5 transition-all",
-                userVote === "up" && "text-chart-1 bg-chart-1/10"
+                idea.user_vote === "up" && "text-chart-1 bg-chart-1/10"
               )}
             >
-              <ThumbsUp className={cn("size-4", userVote === "up" && "fill-current")} />
-              <span className="font-medium">{votes}</span>
+              <ThumbsUp className={cn("size-4", idea.user_vote === "up" && "fill-current")} />
+              <span className="font-medium">{idea.vote_count}</span>
             </Button>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => handleVote("down")}
+              disabled={isVoting}
               className={cn(
-                userVote === "down" && "text-destructive bg-destructive/10"
+                idea.user_vote === "down" && "text-destructive bg-destructive/10"
               )}
             >
-              <ThumbsDown className={cn("size-4", userVote === "down" && "fill-current")} />
+              <ThumbsDown className={cn("size-4", idea.user_vote === "down" && "fill-current")} />
             </Button>
           </div>
 
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" className="gap-1.5">
               <MessageSquare className="size-4" />
-              <span className="text-sm">{idea.comments}</span>
+              <span className="text-sm">{idea.comments_count}</span>
             </Button>
             <Button variant="ghost" size="sm">
               <Share2 className="size-4" />
@@ -154,10 +137,8 @@ function IdeaCard({ idea, index }: IdeaCardProps) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setIsBookmarked(!isBookmarked)}
-              className={cn(isBookmarked && "text-chart-3")}
             >
-              <Bookmark className={cn("size-4", isBookmarked && "fill-current")} />
+              <Bookmark className={cn("size-4")} />
             </Button>
           </div>
         </div>
@@ -167,6 +148,31 @@ function IdeaCard({ idea, index }: IdeaCardProps) {
 }
 
 export function IdeaFeed() {
+  const [ideas, setIdeas] = useState<Idea[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchIdeas = async () => {
+      try {
+        const response = await apiClient.get("ideas/")
+        setIdeas(response.data)
+      } catch (error) {
+        toast.error("Failed to load ideas")
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchIdeas()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -176,9 +182,13 @@ export function IdeaFeed() {
         </Button>
       </div>
       <div className="space-y-4">
-        {ideas.map((idea, index) => (
-          <IdeaCard key={idea.id} idea={idea} index={index} />
-        ))}
+        {ideas.length === 0 ? (
+          <p className="text-center text-muted-foreground py-8">No ideas yet. Be the first to share one!</p>
+        ) : (
+          ideas.map((idea, index) => (
+            <IdeaCard key={idea.id} idea={idea} index={index} />
+          ))
+        )}
       </div>
     </div>
   )
